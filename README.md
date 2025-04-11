@@ -27,14 +27,14 @@
 
 4. **强制使用Worker直接处理**：通过在URL参数中添加`direct`参数，可以强制使用Worker直接处理请求，而不是转发到Cloudflare官方测速接口。
 
-- 使用Cloudflare官方测速接口: `https://<your_workers>/100m`
+- 使用Cloudflare官方测速接口: `https://<your_workers>/100m`（转发到 `https://speed.cloudflare.com/__down?bytes=100000000`）
 - 强制使用Worker直接处理: `https://<your_workers>/100m?direct`
 - 同时自定义分块大小: `https://<your_workers>/100m?direct&chunk=128k`
 
 5. **推荐使用workers部署方案并绑定自定义域，即可同时具备 http/https 两种测速途径。**
 
-- HTTP请求默认使用Worker直接处理
-- HTTPS请求默认转发到Cloudflare官方测速接口，除非添加`direct`参数
+- HTTP请求默认使用Worker直接处理（官方测速使用HTTP无效）
+- HTTPS请求默认转发到Cloudflare官方测速接口（`https://speed.cloudflare.com/__down?bytes=xxx`），除非添加`direct`参数
 
 ## 三、使用指南
 
