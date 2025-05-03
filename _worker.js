@@ -18,17 +18,35 @@ export default {
   
       // 默认下载字节数为 300MB
       let bytes = 300000000;
+      // 默认不按时间限制
+      let timeLimit = 0;
   
-      // 如果路径不为空，尝试从中提取用户指定的大小
+      // 如果路径不为空，尝试从中提取用户指定的大小或时间
       if (path) {
-        const match = path.match(/^(\d+)([kKmMgG]?)$/); // 匹配数字+单位，如 100m、10k、1g
-        if (match) {
-          const value = parseInt(match[1], 10); // 数字部分
-          const unit = match[2] || ""; // 单位部分
-          bytes = convertToBytes(value, unit);
+        // 检查是否是时间格式 (例如 30sec, 2min)
+        const timeMatch = path.match(/^(\d+)(sec|min)$/);
+        if (timeMatch) {
+          const value = parseInt(timeMatch[1], 10);
+          const unit = timeMatch[2];
+          // 转换为毫秒
+          if (unit === "sec") {
+            timeLimit = value * 1000;
+          } else if (unit === "min") {
+            timeLimit = value * 60 * 1000;
+          }
+          // 时间模式下，不限制字节数
+          bytes = Number.MAX_SAFE_INTEGER;
         } else {
-          // 格式不匹配，返回 400 错误
-          return new Response("路径格式错误", { status: 400 });
+          // 尝试匹配字节大小格式
+          const match = path.match(/^(\d+)([kKmMgG]?)$/);
+          if (match) {
+            const value = parseInt(match[1], 10); // 数字部分
+            const unit = match[2] || ""; // 单位部分
+            bytes = convertToBytes(value, unit);
+          } else {
+            // 格式不匹配，返回 400 错误
+            return new Response("路径格式错误，请使用如 100m 或 30sec 的格式", { status: 400 });
+          }
         }
       }
   
@@ -52,33 +70,57 @@ export default {
       // 获取是否使用 Worker 直接处理的参数
       const useDirect = url.searchParams.has('direct');
   
-      // 如果是 HTTPS 请求且不使用直接处理，转发给 Cloudflare 官方测速接口
-      if (isSecure && !useDirect) {
+      // 如果是 HTTPS 请求且不使用直接处理，且不是时间模式，转发给 Cloudflare 官方测速接口
+      if (isSecure && !useDirect && timeLimit === 0) {
         const targetUrl = `https://speed.cloudflare.com/__down?bytes=${bytes}`;
         const response = await fetch(targetUrl, request); // 保留原请求头
         return response;
       } else {
-        // HTTP 请求或强制使用 Worker 直接处理
+        // HTTP 请求或强制使用 Worker 直接处理或时间模式
   
         // 创建一个 ReadableStream 流，用来推送字节数据（模拟下载）
         const stream = new ReadableStream({
           start(controller) {
-            // 使用自定义或默认的分块大小
-            const zeroChunk = new Uint8Array(chunkSize); // 创建一个填满 0 的 buffer
+            // 创建一个随机数据的分块 - 使用缓存提高性能
+            let cachedChunk = null;
+            function getRandomChunk(size) {
+              // 如果请求的大小与缓存的大小相同，直接返回缓存
+              if (cachedChunk && cachedChunk.length === size) {
+                return cachedChunk;
+              }
+              
+              // 否则创建新的随机数据块并缓存
+              const chunk = new Uint8Array(size);
+              crypto.getRandomValues(chunk);
+              cachedChunk = chunk;
+              return chunk;
+            }
+            
             let bytesSent = 0; // 记录已推送的字节数
+            const startTime = Date.now(); // 记录开始时间
   
             // 定义推送函数
             function push() {
-              // 如果已经推完指定字节数，关闭流
-              if (bytesSent >= bytes) {
+              // 检查是否达到时间限制（如果有）
+              if (timeLimit > 0 && (Date.now() - startTime) >= timeLimit) {
+                controller.close();
+                return;
+              }
+              
+              // 检查是否达到字节限制（如果不是时间模式）
+              if (timeLimit === 0 && bytesSent >= bytes) {
                 controller.close();
                 return;
               }
   
-              // 还剩多少未推送
-              const remaining = bytes - bytesSent;
-              const size = Math.min(chunkSize, remaining); // 本次推送大小
-              controller.enqueue(zeroChunk.subarray(0, size)); // 推送 0 填充的 buffer
+              // 还剩多少未推送（时间模式下不限制）
+              const remaining = timeLimit > 0 ? chunkSize : Math.min(bytes - bytesSent, chunkSize);
+              const size = remaining; // 本次推送大小
+              
+              // 生成并推送随机数据
+              const randomChunk = getRandomChunk(size);
+              controller.enqueue(randomChunk);
+              
               bytesSent += size;
   
               // 下一轮推送（非阻塞）
@@ -91,13 +133,20 @@ export default {
         });
   
         // 返回自定义响应
+        const headers = {
+          'Content-Type': 'application/octet-stream', // 二进制流格式
+          'X-Content-Type-Options': 'nosniff', // 防止MIME类型嗅探
+          'Cache-Control': 'no-store', // 防止缓存
+        };
+        
+        // 只有在非时间模式下才设置 Content-Length
+        if (timeLimit === 0) {
+          headers['Content-Length'] = bytes.toString();
+        }
+        
         return new Response(stream, {
           status: 200,
-          headers: {
-            'Content-Type': 'application/octet-stream', // 二进制流格式
-            'Content-Length': bytes.toString(), // 设置精确长度，curl 需要
-            'Cache-Control': 'no-store', // 防止缓存
-          }
+          headers: headers
         });
       }
     }
