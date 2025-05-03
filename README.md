@@ -18,6 +18,8 @@
 - 1024K  测试下载地址: `https://<your_workers>/1024k`
 - 200M   测试下载地址: `https://<your_workers>/200m`
 - 1G     测试下载地址: `https://<your_workers>/1g`
+- sec    以秒数控制
+- min    以分钟控制
 
 3. **自定义分块大小**：通过在URL参数中添加`chunk`参数，可以自定义数据分块的大小，默认为64KB。分块大小最小为1KB，最大为1MB。
 
