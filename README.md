@@ -33,12 +33,14 @@
 - 强制使用Worker直接处理: `https://<your_workers>/100m?direct`
 - 同时自定义分块大小: `https://<your_workers>/100m?direct&chunk=128k`
 
-5. **推荐使用workers部署方案并绑定自定义域，即可同时具备 http/https 两种测速途径。**
-
-- HTTP请求默认使用Worker直接处理（官方测速使用HTTP无效）
-- HTTPS请求默认转发到Cloudflare官方测速接口（`https://speed.cloudflare.com/__down?bytes=xxx`），除非添加`direct`参数
-
 ## 三、使用指南
+
+> [!TIP]
+> 推荐使用workers部署方案并绑定自定义域，即可同时具备 http/https 两种测速途径
+> 
+> 建议使用秒数而不是固定大小，否则下载速度太快可能提前结束下载
+> 
+> 测速 HTTP 时，必须 Worker 直接进行下载，否则即便重定向依旧是 HTTPS
 
 1. 克隆或下载本项目到你的本地设备。
 
@@ -50,6 +52,7 @@
 
 ## 四、注意事项
 
-- 代码中的路径需要做适当修改，以反映你自己的Cloudflare Worker的URL。
-- 当路径不符合预设的格式时，程序将返回400错误。
-- 分块大小会影响下载速度和资源使用，较小的分块可能导致更多的处理开销，较大的分块可能导致内存使用增加。
+- HTTP请求默认使用Worker直接处理（官方测速使用HTTP无效）
+- HTTPS请求默认转发到Cloudflare官方测速接口（`https://speed.cloudflare.com/__down?bytes=xxx`），除非添加`direct`参数
+- 当路径不符合预设的格式时，程序将返回400错误
+- 分块大小会影响下载速度和资源使用，较小的分块可能导致更多的处理开销，较大的分块可能导致内存使用增加
