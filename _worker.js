@@ -112,8 +112,6 @@ export default {
           'Content-Type': 'application/octet-stream', // 二进制流格式
           'X-Content-Type-Options': 'nosniff', // 防止MIME类型嗅探
           'Cache-Control': 'no-store', // 防止缓存
-          'Content-Length': bytes.toString(), // 指示响应体的大小
-          'Access-Control-Allow-Origin': '*', // 允许跨域访问
           'X-Download-Options': 'noopen' // 防止下载后自动打开
         };
         
