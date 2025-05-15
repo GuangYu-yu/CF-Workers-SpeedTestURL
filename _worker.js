@@ -18,35 +18,18 @@ export default {
   
       // 默认下载字节数为 300MB
       let bytes = 300000000;
-      // 默认不按时间限制
-      let timeLimit = 0;
   
-      // 如果路径不为空，尝试从中提取用户指定的大小或时间
+      // 如果路径不为空，尝试从中提取用户指定的大小
       if (path) {
-        // 检查是否是时间格式 (例如 30sec, 2min)
-        const timeMatch = path.match(/^(\d+)(sec|min)$/);
-        if (timeMatch) {
-          const value = parseInt(timeMatch[1], 10);
-          const unit = timeMatch[2];
-          // 转换为毫秒
-          if (unit === "sec") {
-            timeLimit = value * 1000;
-          } else if (unit === "min") {
-            timeLimit = value * 60 * 1000;
-          }
-          // 时间模式下，不限制字节数
-          bytes = Number.MAX_SAFE_INTEGER;
+        // 尝试匹配字节大小格式
+        const match = path.match(/^(\d+)([kKmMgG]?)$/);
+        if (match) {
+          const value = parseInt(match[1], 10); // 数字部分
+          const unit = match[2] || ""; // 单位部分
+          bytes = convertToBytes(value, unit);
         } else {
-          // 尝试匹配字节大小格式
-          const match = path.match(/^(\d+)([kKmMgG]?)$/);
-          if (match) {
-            const value = parseInt(match[1], 10); // 数字部分
-            const unit = match[2] || ""; // 单位部分
-            bytes = convertToBytes(value, unit);
-          } else {
-            // 格式不匹配，返回 400 错误
-            return new Response("路径格式错误，请使用如 100m 或 30sec 的格式", { status: 400 });
-          }
+          // 格式不匹配，返回 400 错误
+          return new Response("路径格式错误，请使用如 100m 的格式", { status: 400 });
         }
       }
   
@@ -70,13 +53,13 @@ export default {
       // 获取是否使用 Worker 直接处理的参数
       const useDirect = url.searchParams.has('direct');
   
-      // 如果是 HTTPS 请求且不使用直接处理，且不是时间模式，转发给 Cloudflare 官方测速接口
-      if (isSecure && !useDirect && timeLimit === 0) {
+      // 如果是 HTTPS 请求且不使用直接处理，转发给 Cloudflare 官方测速接口
+      if (isSecure && !useDirect) {
         const targetUrl = `https://speed.cloudflare.com/__down?bytes=${bytes}`;
         const response = await fetch(targetUrl, request); // 保留原请求头
         return response;
       } else {
-        // HTTP 请求或强制使用 Worker 直接处理或时间模式
+        // HTTP 请求或强制使用 Worker 直接处理
   
         // 创建一个 ReadableStream 流，用来推送字节数据（模拟下载）
         const stream = new ReadableStream({
@@ -97,36 +80,28 @@ export default {
             }
             
             let bytesSent = 0; // 记录已推送的字节数
-            const startTime = Date.now(); // 记录开始时间
-  
+            
             // 定义推送函数
             function push() {
-              // 检查是否达到时间限制（如果有）
-              if (timeLimit > 0 && (Date.now() - startTime) >= timeLimit) {
+              // 检查是否达到字节限制
+              if (bytesSent >= bytes) {
                 controller.close();
                 return;
               }
-              
-              // 检查是否达到字节限制（如果不是时间模式）
-              if (timeLimit === 0 && bytesSent >= bytes) {
-                controller.close();
-                return;
-              }
-  
-              // 还剩多少未推送（时间模式下不限制）
-              const remaining = timeLimit > 0 ? chunkSize : Math.min(bytes - bytesSent, chunkSize);
-              const size = remaining; // 本次推送大小
+
+              // 计算本次推送大小
+              const size = Math.min(bytes - bytesSent, chunkSize);
               
               // 生成并推送随机数据
               const randomChunk = getRandomChunk(size);
               controller.enqueue(randomChunk);
               
               bytesSent += size;
-  
+
               // 下一轮推送（非阻塞）
               setTimeout(push, 0);
             }
-  
+
             // 启动第一次推送
             push();
           }
@@ -137,12 +112,10 @@ export default {
           'Content-Type': 'application/octet-stream', // 二进制流格式
           'X-Content-Type-Options': 'nosniff', // 防止MIME类型嗅探
           'Cache-Control': 'no-store', // 防止缓存
+          'Content-Length': bytes.toString(), // 指示响应体的大小
+          'Access-Control-Allow-Origin': '*', // 允许跨域访问
+          'X-Download-Options': 'noopen' // 防止下载后自动打开
         };
-        
-        // 只有在非时间模式下才设置 Content-Length
-        if (timeLimit === 0) {
-          headers['Content-Length'] = bytes.toString();
-        }
         
         return new Response(stream, {
           status: 200,
@@ -150,5 +123,4 @@ export default {
         });
       }
     }
-  };
-  
+};
