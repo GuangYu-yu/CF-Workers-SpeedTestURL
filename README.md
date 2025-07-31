@@ -1,51 +1,62 @@
-# SpeedTest-CloudflareWorker
+<div align="center">
 
-## 一、项目简介
+# 🚀 SpeedTest-CloudflareWorker
 
-本项目是一个使用Cloudflare的Worker搭建SpeedTest测速地址的工程，主要代码在`worker.js`文件中。通过本项目，你可以很容易地在Cloudflare上搭建起自己的测速服务。
+[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## 二、功能介绍
+</div>
 
-例如您的项目域名为 `<your_workers>`
+---
 
-1. **没有设定默认大小**：需要在路径中指定下载大小。
- 
-2. **自定义测速大小**：通过在路径中指定数字和单位（可选的单位包括 K，M，G），可以设定想要进行测速的数据大小，如"/500M"表示进行500MB的测速。
+## 📖 项目简介
 
-- 1024K  测试下载地址: `https://<your_workers>/1024k`
-- 200M   测试下载地址: `https://<your_workers>/200m`
-- 1G     测试下载地址: `https://<your_workers>/1g`
+**在Cloudflare Workers上快速搭建专属测速服务** ⚡
 
-3. **自定义分块大小**：通过在URL参数中添加`chunk`参数，可以自定义数据分块的大小，默认为64KB。分块大小最小为1KB，最大为1MB。
+---
 
-- 100M，使用默认分块大小: `https://<your_workers>/100m`
-- 100M，使用16KB分块: `https://<your_workers>/100m?chunk=16k`
-- 100M，使用512KB分块: `https://<your_workers>/100m?chunk=512k`
+## 🎯 功能特性
 
-4. **强制使用Worker直接处理**：通过在URL参数中添加`direct`参数，可以强制使用Worker直接处理请求，而不是转发到Cloudflare官方测速接口。
+### 📊 测速规格定制
 
-- 使用Cloudflare官方测速接口: `https://<your_workers>/100m`（转发到 `https://speed.cloudflare.com/__down?bytes=100000000`）
-- 强制使用Worker直接处理: `https://<your_workers>/100m?direct`
-- 同时自定义分块大小: `https://<your_workers>/100m?direct&chunk=128k`
+#### 1. 自定义数据大小
+支持灵活设置测速数据量，单位可选：**K**、**M**、**G**
 
-## 三、使用指南
+| 数据大小 | 示例地址 | 说明 |
+|---------|----------|------|
+| **1024K** | `https://<your_workers>/1024k` | 1MB测速包 |
+| **200M** | `https://<your_workers>/200m` | 200MB测速包 |
+| **1G** | `https://<your_workers>/1g` | 1GB测速包 |
 
-> [!TIP]
-> 推荐使用workers部署方案并绑定自定义域，即可同时具备 http/https 两种测速途径
-> 
-> 测速 HTTP 时，必须 Worker 直接进行下载，否则即便重定向依旧是 HTTPS
+#### 2. 智能分块策略
+通过 `chunk` 参数自定义分块大小（默认64KB）
 
-1. 克隆或下载本项目到你的本地设备。
+| 分块大小 | 示例地址
+|----------|----------|
+| **默认64KB** | `https://<your_workers>/100m`
+| **16KB** | `https://<your_workers>/100m?chunk=16k`
 
-2. 在Cloudflare的Worker中创建一个新的项目，并将`worker.js`文件中的代码复制粘贴到你的项目中。
+> 💡 **分块范围**：1KB - 1MB
 
-3. 部署你的Worker项目。
+#### 3. 处理模式选择
+通过 `direct` 参数控制请求处理方式
 
-现在，你可以访问你的Worker的URL，进行网速测试了。
+| 请求方式                       | 是否转发 Cloudflare 官方测速                |
+| -------------------------- | ----------------------------------- |
+| **HTTPS + 无 `?direct` 参数** | 转发到 `speed.cloudflare.com/__down` |
+| **HTTP**                   | 直接生成数据                    |
+| **HTTPS + 有 `?direct` 参数** | 直接生成数据                    |
 
-## 四、注意事项
+---
 
-- HTTP请求默认使用Worker直接处理（官方测速使用HTTP无效）
-- HTTPS请求默认转发到Cloudflare官方测速接口（`https://speed.cloudflare.com/__down?bytes=xxx`），除非添加`direct`参数
-- 当路径不符合预设的格式时，程序将返回400错误
-- 分块大小会影响下载速度和资源使用，较小的分块可能导致更多的处理开销，较大的分块可能导致内存使用增加
+## ⚠️ 重要提醒
+
+- **HTTP协议**：默认使用直连处理（官方接口不支持HTTP）
+- **错误处理**：路径格式错误时返回 **400 Bad Request**
+- **部署建议**：部署在Workers中，同时支持HTTP/HTTPS双协议测速，而pages只支持HTTPS
+
+---
+
+<div align="center">
+
+</div>
