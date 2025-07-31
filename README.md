@@ -3,7 +3,6 @@
 # 🚀 SpeedTest-CloudflareWorker
 
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 </div>
 
