@@ -24,6 +24,9 @@ export default {
 
     const useDirect = url.searchParams.has("direct");
     const useZero = url.searchParams.has("zero");
+    
+    // zero 模式自动启用 direct 
+    if (useZero) useDirect = true;
 
     const headers = new Headers({
       "Content-Type": "application/octet-stream",
