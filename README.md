@@ -31,8 +31,8 @@
 #### 2. 数据生成模式
 - **官方模式**（默认）：转发Cloudflare官方测速
 - **直连模式**：Worker直接生成随机数据或全0数据
-  - 添加 `?direct` 参数启用直连模式
-  - 添加 `?zero` 参数生成全0数据
+  - 添加 `?direct` 参数直接在Worker生成随机数据
+  - 添加 `?zero` 参数直接在Worker生成全0数据
 ---
 
 <div align="center">
