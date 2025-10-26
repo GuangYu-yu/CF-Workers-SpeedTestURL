@@ -26,7 +26,7 @@
 | **1024K** | `https://<your_workers>/1024k` | 1MB测速包 |
 | **200M** | `https://<your_workers>/200m` | 200MB测速包 |
 | **1G** | `https://<your_workers>/1g` | 1GB测速包 |
-| **默认** | `https://<your_workers>/` | 500MB测速包 |
+| **默认** | `https://<your_workers>/` | 无效 |
 
 #### 2. 数据生成模式
 - **官方模式**（默认）：转发Cloudflare官方测速
