@@ -10,15 +10,7 @@ const UNIT_MAP = {
 const MAX_BYTES = 1073741824;  // 1 GiB
 const CHUNK_SIZE = 65536;      // 64 KB
 
-// ==================== 工具函数 ====================
-function jsonError(message, status) {
-  return new Response(JSON.stringify({ error: message }), {
-    status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
-  });
-}
-
-// nginx 404
+// ==================== nginx 404 ====================
 function fakeNotFound() {
   return new Response(
     '<!DOCTYPE html>\n<html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>',
@@ -35,23 +27,73 @@ function fakeNotFound() {
 
 const DOWNLOAD_HEADERS = {
   'Content-Type': 'application/octet-stream',
-  'Accept-Ranges': 'none',
+  'Content-Disposition': 'attachment; filename="download.bin"',
+  'Accept-Ranges': 'bytes',
   'Cache-Control': 'no-store',
-  'X-Content-Type-Options': 'nosniff',
-  'X-Download-Options': 'noopen',
-  'Referrer-Policy': 'no-referrer',
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Expose-Headers': 'Content-Length, Accept-Ranges',
+  'Access-Control-Expose-Headers': 'Content-Length, Content-Range',
 };
 
+// ==================== Range 解析 ====================
+function parseRange(rangeHeader, totalBytes) {
+  if (!rangeHeader) return null;
+  const m = rangeHeader.match(/^bytes=(\d*)-(\d*)$/);
+  if (!m) return null;
+
+  const a = m[1] === '' ? null : parseInt(m[1], 10);
+  const b = m[2] === '' ? null : parseInt(m[2], 10);
+
+  // bytes=N-M  → 指定区间
+  if (a !== null && b !== null) {
+    if (a > b || a >= totalBytes) return { error: true };
+    const e = Math.min(b, totalBytes - 1);
+    return { start: a, end: e, contentLength: e - a + 1 };
+  }
+
+  // bytes=N-  → 从 N 到末尾
+  if (a !== null && b === null) {
+    if (a >= totalBytes) return { error: true };
+    return { start: a, end: totalBytes - 1, contentLength: totalBytes - a };
+  }
+
+  // bytes=-N  → 最后 N 个字节
+  if (a === null && b !== null) {
+    if (b <= 0) return { error: true };
+    const s = Math.max(0, totalBytes - b);
+    return { start: s, end: totalBytes - 1, contentLength: totalBytes - s };
+  }
+
+  return null;
+}
+
+// ==================== 响应构造（HEAD / GET 共用） ====================
+function buildResponse(totalBytes, rangeInfo, useZero) {
+  const targetBytes = rangeInfo ? rangeInfo.contentLength : totalBytes;
+  const headers = { ...DOWNLOAD_HEADERS, 'Content-Length': String(targetBytes) };
+  let status = 200;
+
+  if (rangeInfo) {
+    status = 206;
+    headers['Content-Range'] = `bytes ${rangeInfo.start}-${rangeInfo.end}/${totalBytes}`;
+  }
+
+  // 全零模式内容稳定，ETag 不变；随机模式每次不同，不设 ETag
+  if (useZero) {
+    headers['ETag'] = `"zero-${totalBytes}"`;
+  }
+
+  return { status, headers, targetBytes };
+}
+
 // ==================== 下载端点 ====================
-function streamDownload(bytes, useZero) {
+function streamDownload(totalBytes, useZero, rangeInfo) {
+  const { status, headers, targetBytes } = buildResponse(totalBytes, rangeInfo, useZero);
   let sent = 0;
 
   return new Response(
     new ReadableStream({
       pull(controller) {
-        const rem = bytes - sent;
+        const rem = targetBytes - sent;
         if (rem <= 0) return controller.close();
         const size = Math.min(rem, CHUNK_SIZE);
         const chunk = new Uint8Array(size);
@@ -60,23 +102,8 @@ function streamDownload(bytes, useZero) {
         sent += size;
       },
     }),
-    {
-      status: 200,
-      headers: { ...DOWNLOAD_HEADERS, 'Content-Length': String(bytes) },
-    },
+    { status, headers },
   );
-}
-
-async function proxyDownload(bytes) {
-  const resp = await fetch(`https://speed.cloudflare.com/__down?bytes=${bytes}`);
-
-  if (!resp.ok) {
-    return jsonError(`Upstream error: ${resp.status}`, resp.status);
-  }
-
-  const headers = new Headers(DOWNLOAD_HEADERS);
-  headers.set('Content-Length', String(bytes));
-  return new Response(resp.body, { status: 200, headers });
 }
 
 // ==================== 入口 ====================
@@ -114,11 +141,29 @@ export default {
     }
 
     const requested = parseInt(match[1], 10) * (multiplier || 1);
-    const bytes = Math.min(Math.max(requested, 1), MAX_BYTES);
+    const totalBytes = Math.min(Math.max(requested, 1), MAX_BYTES);
 
-    const useZero = url.searchParams.has('zero');
-    const useDirect = url.searchParams.has('direct') || useZero;
+    // 解析 Range 请求头
+    const rangeInfo = parseRange(request.headers.get('Range'), totalBytes);
 
-    return useDirect ? streamDownload(bytes, useZero) : proxyDownload(bytes);
+    if (rangeInfo && rangeInfo.error) {
+      return new Response(null, {
+        status: 416,
+        headers: {
+          'Content-Range': `bytes */${totalBytes}`,
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    }
+
+    const useZero = !url.searchParams.has('random');
+
+    // HEAD 请求：返回相同响应头但不含 body
+    if (request.method === 'HEAD') {
+      const { status, headers } = buildResponse(totalBytes, rangeInfo, useZero);
+      return new Response(null, { status, headers });
+    }
+
+    return streamDownload(totalBytes, useZero, rangeInfo);
   },
 };
