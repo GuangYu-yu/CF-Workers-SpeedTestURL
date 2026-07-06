@@ -1,60 +1,124 @@
-export default {
-  async fetch(request) {
-    const url = new URL(request.url);
-    const path = url.pathname.slice(1); // 去掉前导斜杠
-    const MAX_SIZE = 1e9;               // 最大 1GB
-    const CHUNK = 64 * 1024;            // 64KB
+// ==================== 配置与常量 ====================
+// 设为 "abc123" 后需通过 /abc123/100m 访问
+const PATH_PREFIX = '';
 
-    // 解析下载字节数，未指定返回 0
-    const parseBytes = s => {
-      if (!s) return 0;                 // 没有指定大小
-      const m = s.match(/^(\d+)([kKmMgG]b?)?$/);
-      if (!m) return null;              // 格式错误
-      let val = parseInt(m[1], 10);
-      const unit = (m[2] || "").toLowerCase();
-      if (unit.startsWith("k")) val *= 1e3;
-      if (unit.startsWith("m")) val *= 1e6;
-      if (unit.startsWith("g")) val *= 1e9;
-      return Math.min(val, MAX_SIZE);
-    };
+const UNIT_MAP = {
+  k: 1024, kb: 1024,
+  m: 1048576, mb: 1048576,
+  g: 1073741824, gb: 1073741824,
+};
+const MAX_BYTES = 1073741824;  // 1 GiB
+const CHUNK_SIZE = 65536;      // 64 KB
 
-    const bytes = parseBytes(path);
-    if (bytes === null) return new Response("Bad Request", { status: 400 });
-    if (bytes === 0) return new Response(null, { status: 204 }); // 未指定大小返回空
+// ==================== 工具函数 ====================
+function jsonError(message, status) {
+  return new Response(JSON.stringify({ error: message }), {
+    status,
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+  });
+}
 
-    const useDirect = url.searchParams.has("direct");
-    const useZero = url.searchParams.has("zero");
-    
-    // zero 模式自动启用 direct 
-    if (useZero) useDirect = true;
+// nginx 404
+function fakeNotFound() {
+  return new Response(
+    '<!DOCTYPE html>\n<html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>',
+    {
+      status: 404,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Server': 'nginx',
+        'Connection': 'keep-alive',
+      },
+    },
+  );
+}
 
-    const headers = new Headers({
-      "Content-Type": "application/octet-stream",
-      "Content-Length": bytes.toString(),
-      "X-Content-Type-Options": "nosniff",
-      "Cache-Control": "no-store",
-      "X-Download-Options": "noopen",
-      "Referrer-Policy": "no-referrer"
-    });
+const DOWNLOAD_HEADERS = {
+  'Content-Type': 'application/octet-stream',
+  'Accept-Ranges': 'none',
+  'Cache-Control': 'no-store',
+  'X-Content-Type-Options': 'nosniff',
+  'X-Download-Options': 'noopen',
+  'Referrer-Policy': 'no-referrer',
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Expose-Headers': 'Content-Length, Accept-Ranges',
+};
 
-    // 转发官方测速接口
-    if (!useDirect) {
-      const resp = await fetch(`https://speed.cloudflare.com/__down?bytes=${bytes}`);
-      return new Response(resp.body, { status: resp.status, headers });
-    }
+// ==================== 下载端点 ====================
+function streamDownload(bytes, useZero) {
+  let sent = 0;
 
-    // Worker 生成数据流
-    let sent = 0;
-    const stream = new ReadableStream({
+  return new Response(
+    new ReadableStream({
       pull(controller) {
         const rem = bytes - sent;
         if (rem <= 0) return controller.close();
-        const size = Math.min(rem, CHUNK);
-        controller.enqueue(useZero ? new Uint8Array(size) : crypto.getRandomValues(new Uint8Array(size)));
+        const size = Math.min(rem, CHUNK_SIZE);
+        const chunk = new Uint8Array(size);
+        if (!useZero) crypto.getRandomValues(chunk);
+        controller.enqueue(chunk);
         sent += size;
-      }
-    });
+      },
+    }),
+    {
+      status: 200,
+      headers: { ...DOWNLOAD_HEADERS, 'Content-Length': String(bytes) },
+    },
+  );
+}
 
-    return new Response(stream, { status: 200, headers });
+async function proxyDownload(bytes) {
+  const resp = await fetch(`https://speed.cloudflare.com/__down?bytes=${bytes}`);
+
+  if (!resp.ok) {
+    return jsonError(`Upstream error: ${resp.status}`, resp.status);
   }
+
+  const headers = new Headers(DOWNLOAD_HEADERS);
+  headers.set('Content-Length', String(bytes));
+  return new Response(resp.body, { status: 200, headers });
+}
+
+// ==================== 入口 ====================
+export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    const path = url.pathname.slice(1);
+
+    if (PATH_PREFIX && path !== PATH_PREFIX && !path.startsWith(PATH_PREFIX + '/')) {
+      return fakeNotFound();
+    }
+    const suffix = PATH_PREFIX ? path.slice(PATH_PREFIX.length).replace(/^\//, '') : path;
+
+    // CORS 预检
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+          'Access-Control-Max-Age': '86400',
+        },
+      });
+    }
+
+    // 解析后缀中的 <number>[k|m|g][b]
+    const match = suffix.match(/^(\d+)([a-z]{0,2})$/i);
+    if (!match) {
+      return fakeNotFound();
+    }
+
+    const unit = match[2].toLowerCase();
+    const multiplier = UNIT_MAP[unit];
+    if (unit && !multiplier) {
+      return fakeNotFound();
+    }
+
+    const requested = parseInt(match[1], 10) * (multiplier || 1);
+    const bytes = Math.min(Math.max(requested, 1), MAX_BYTES);
+
+    const useZero = url.searchParams.has('zero');
+    const useDirect = url.searchParams.has('direct') || useZero;
+
+    return useDirect ? streamDownload(bytes, useZero) : proxyDownload(bytes);
+  },
 };
